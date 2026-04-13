@@ -1,0 +1,12 @@
+.venv
+venv
+__pycache__
+*.pyc
+audit_logs
+ephemeral_ws_*
+.env
+.env.*
+.git
+.gitignore
+.vscode
+*.log

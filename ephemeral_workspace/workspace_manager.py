@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+import shutil
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+from .secure_wiper import SecureWiper, WipeStats
+
+
+@dataclass
+class SessionPaths:
+    root: Path
+    profile: Path
+    downloads: Path
+    user_files: Path
+
+
+class WorkspaceManager:
+    """Creates and destroys an ephemeral workspace for one browser session."""
+
+    def __init__(self, base_prefix: str = "ephemeral_ws_", wipe_passes: int = 2) -> None:
+        self._base_prefix = base_prefix
+        self._wiper = SecureWiper(passes=wipe_passes)
+        self.session_paths: SessionPaths | None = None
+
+    def create(self) -> SessionPaths:
+        session_root = Path(tempfile.mkdtemp(prefix=self._base_prefix))
+        profile = session_root / "profile"
+        downloads = session_root / "downloads"
+        user_files = session_root / "files"
+
+        profile.mkdir(parents=True, exist_ok=True)
+        downloads.mkdir(parents=True, exist_ok=True)
+        user_files.mkdir(parents=True, exist_ok=True)
+
+        self.session_paths = SessionPaths(
+            root=session_root,
+            profile=profile,
+            downloads=downloads,
+            user_files=user_files,
+        )
+        return self.session_paths
+
+    def destroy(self) -> WipeStats:
+        if not self.session_paths:
+            return WipeStats()
+
+        root = self.session_paths.root
+        stats = self._wiper.wipe_directory(root)
+
+        # Best-effort fallback if secure wipe had partial failures.
+        if root.exists():
+            shutil.rmtree(root, ignore_errors=True)
+
+        self.session_paths = None
+        return stats
+
+    def session_label(self) -> str:
+        return f"session-{int(time.time())}"

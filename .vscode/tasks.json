@@ -1,0 +1,42 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "setup: install deps + chromium",
+      "type": "shell",
+      "command": "& \".\\.venv\\Scripts\\python.exe\" -m pip install -r requirements.txt; & \".\\.venv\\Scripts\\python.exe\" -m playwright install chromium",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "demo: e2e",
+      "type": "shell",
+      "command": "& \".\\.venv\\Scripts\\python.exe\" e2e_demo.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "run: cli",
+      "type": "shell",
+      "command": "& \".\\.venv\\Scripts\\python.exe\" main.py --mode cli",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "run: gui",
+      "type": "shell",
+      "command": "& \".\\.venv\\Scripts\\python.exe\" main.py --mode gui",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
