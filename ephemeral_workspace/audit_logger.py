@@ -36,10 +36,29 @@ class AuditLogger:
         end = self.events[-1].ts if self.events else start
         duration = max(0.0, end - start)
 
+        event_names = {event.name for event in self.events}
+        wipe_event = next((e for e in reversed(self.events) if e.name == "workspace_wiped"), None)
+        wiped_files = wipe_event.details.get("files_wiped", 0) if wipe_event else 0
+        host_scan = next((e for e in reversed(self.events) if e.name == "host_persistence_scan"), None)
+        host_findings = host_scan.details.get("findings", -1) if host_scan else -1
+
+        score = 0
+        if "workspace_wiped" in event_names:
+            score += 40
+        if host_findings == 0:
+            score += 30
+        if "process_kill_fallback" in event_names:
+            score += 15
+        if "session_error" not in event_names:
+            score += 15
+
         lines = [
             f"Session ID: {self.session_id}",
             f"Duration seconds: {duration:.2f}",
             f"Event count: {len(self.events)}",
+            f"Files wiped: {wiped_files}",
+            f"Host findings: {host_findings}",
+            f"Session score (/100): {score}",
             "",
             "Timeline:",
         ]

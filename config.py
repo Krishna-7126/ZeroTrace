@@ -6,6 +6,8 @@ from pathlib import Path
 DEFAULT_START_URL = "https://example.com"
 DEFAULT_WIPE_PASSES = 2
 DEFAULT_AUDIT_DIR = Path("audit_logs")
+MIN_STORAGE_FREE_GB = 2
+SESSION_ROOT_WARN_IF_NOT_EMPTY = True
 
 CHROMIUM_FLAGS = [
     "--incognito",

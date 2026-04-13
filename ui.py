@@ -4,12 +4,14 @@ import time
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 from config import DEFAULT_START_URL
 from ephemeral_workspace.audit_logger import AuditLogger
+from ephemeral_workspace.app_session_manager import AppSessionManager
 from ephemeral_workspace.browser_manager import BrowserManager
 from ephemeral_workspace.file_guard import FileGuard
+from ephemeral_workspace.sandbox_manager import SandboxManager
 from ephemeral_workspace.workspace_manager import WorkspaceManager
 
 
@@ -17,10 +19,12 @@ class EphemeralWorkspaceUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Ephemeral Workspace Launcher")
-        self.root.geometry("520x280")
+        self.root.geometry("760x460")
 
         self.workspace = WorkspaceManager()
         self.browser = BrowserManager()
+        self.app_session = AppSessionManager()
+        self.sandbox = SandboxManager()
         self.running = False
         self.paths = None
         self.audit: AuditLogger | None = None
@@ -28,6 +32,12 @@ class EphemeralWorkspaceUI:
         self.session_start_ts = 0.0
 
         self.url_var = tk.StringVar(value=DEFAULT_START_URL)
+        self.session_type_var = tk.StringVar(value="browser")
+        self.storage_root_var = tk.StringVar(value="")
+        self.app_path_var = tk.StringVar(value="explorer.exe")
+        self.app_args_var = tk.StringVar(value="")
+        self.sandbox_cmd_var = tk.StringVar(value="explorer.exe C:\\HostSession\\files")
+        self.timeout_min_var = tk.StringVar(value="0")
         self.status_var = tk.StringVar(value="Idle")
 
         self._build()
@@ -36,8 +46,38 @@ class EphemeralWorkspaceUI:
         frame = tk.Frame(self.root, padx=16, pady=16)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(frame, text="Start URL:").pack(anchor="w")
+        tk.Label(frame, text="Session Type:").pack(anchor="w")
+        mode_frame = tk.Frame(frame)
+        mode_frame.pack(fill=tk.X)
+        tk.Radiobutton(mode_frame, text="Browser", variable=self.session_type_var, value="browser").pack(
+            side=tk.LEFT, padx=(0, 10)
+        )
+        tk.Radiobutton(mode_frame, text="App", variable=self.session_type_var, value="app").pack(side=tk.LEFT)
+        tk.Radiobutton(mode_frame, text="Sandbox", variable=self.session_type_var, value="sandbox").pack(side=tk.LEFT, padx=(10, 0))
+
+        tk.Label(frame, text="Storage Root (Optional - choose empty folder on desired drive):").pack(anchor="w", pady=(8, 0))
+        storage_frame = tk.Frame(frame)
+        storage_frame.pack(fill=tk.X)
+        tk.Entry(storage_frame, textvariable=self.storage_root_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(storage_frame, text="Browse", command=self._pick_storage_root).pack(side=tk.LEFT, padx=(8, 0))
+
+        tk.Label(frame, text="Browser Start URL:").pack(anchor="w", pady=(8, 0))
         tk.Entry(frame, textvariable=self.url_var).pack(fill=tk.X)
+
+        tk.Label(frame, text="App Executable (for App mode):").pack(anchor="w", pady=(8, 0))
+        app_frame = tk.Frame(frame)
+        app_frame.pack(fill=tk.X)
+        tk.Entry(app_frame, textvariable=self.app_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(app_frame, text="Browse EXE", command=self._pick_app_executable).pack(side=tk.LEFT, padx=(8, 0))
+
+        tk.Label(frame, text="App Arguments (space-separated):").pack(anchor="w", pady=(8, 0))
+        tk.Entry(frame, textvariable=self.app_args_var).pack(fill=tk.X)
+
+        tk.Label(frame, text="Sandbox Startup Command (for Sandbox mode):").pack(anchor="w", pady=(8, 0))
+        tk.Entry(frame, textvariable=self.sandbox_cmd_var).pack(fill=tk.X)
+
+        tk.Label(frame, text="Auto Timeout Minutes (0 = disabled):").pack(anchor="w", pady=(8, 0))
+        tk.Entry(frame, textvariable=self.timeout_min_var).pack(fill=tk.X)
 
         btn_frame = tk.Frame(frame)
         btn_frame.pack(fill=tk.X, pady=12)
@@ -59,26 +99,62 @@ class EphemeralWorkspaceUI:
         self.start_btn.config(state=tk.DISABLED)
         self.end_btn.config(state=tk.NORMAL)
 
-        self.paths = self.workspace.create()
+        storage_root = Path(self.storage_root_var.get()).expanduser() if self.storage_root_var.get().strip() else None
+        self.paths = self.workspace.create(storage_root=storage_root)
         self.session_start_ts = time.time()
         self.guard = FileGuard(self.paths.root)
         self.audit = AuditLogger(self.workspace.session_label(), Path("audit_logs"))
-        self.audit.log("session_created", root=str(self.paths.root), ui=True)
+        self.audit.log("session_created", root=str(self.paths.root), ui=True, session_type=self.session_type_var.get())
 
         self.status_var.set(f"Running session in {self.paths.root}")
 
+        timeout_min = 0
+        try:
+            timeout_min = max(0, int(self.timeout_min_var.get().strip() or "0"))
+        except ValueError:
+            timeout_min = 0
+
+        if timeout_min > 0:
+            self.audit.log("timeout_enabled", minutes=timeout_min, ui=True)
+
+            def _timeout_worker() -> None:
+                time.sleep(timeout_min * 60)
+                if self.running:
+                    self.root.after(0, self.end_session)
+
+            threading.Thread(target=_timeout_worker, daemon=True).start()
+
         def _worker() -> None:
             try:
-                self.browser.launch(
-                    profile_dir=str(self.paths.profile),
-                    downloads_dir=str(self.paths.downloads),
-                    start_url=self.url_var.get(),
-                )
-                if self.audit:
-                    self.audit.log("browser_launch_completed", url=self.url_var.get(), ui=True)
-                self.browser.wait_until_closed()
-                if self.audit:
-                    self.audit.log("browser_window_closed", ui=True)
+                if self.session_type_var.get() == "browser":
+                    self.browser.launch(
+                        profile_dir=str(self.paths.profile),
+                        downloads_dir=str(self.paths.downloads),
+                        start_url=self.url_var.get(),
+                    )
+                    if self.audit:
+                        self.audit.log("browser_launch_completed", url=self.url_var.get(), ui=True)
+                    self.browser.wait_until_closed()
+                    if self.audit:
+                        self.audit.log("browser_window_closed", ui=True)
+                else:
+                    if self.session_type_var.get() == "app":
+                        executable = self.app_path_var.get().strip() or "explorer.exe"
+                        app_args = [arg for arg in self.app_args_var.get().split(" ") if arg.strip()]
+                        pid = self.app_session.launch_app(executable=executable, app_args=app_args, paths=self.paths)
+                        if self.audit:
+                            self.audit.log("app_launch_completed", executable=executable, app_args=app_args, pid=pid, ui=True)
+                        self.app_session.wait_until_closed()
+                        if self.audit:
+                            self.audit.log("app_window_closed", pid=pid, ui=True)
+                    else:
+                        cmd = self.sandbox_cmd_var.get().strip() or "explorer.exe C:\\HostSession\\files"
+                        pid = self.sandbox.launch(paths=self.paths, startup_command=cmd)
+                        if self.audit:
+                            self.audit.log("sandbox_launch_completed", command=cmd, pid=pid, ui=True)
+                        self.sandbox.wait_until_closed()
+                        if self.audit:
+                            self.audit.log("sandbox_window_closed", pid=pid, ui=True)
             except Exception as exc:
                 if self.audit:
                     self.audit.log("session_error", error=str(exc), ui=True)
@@ -93,13 +169,15 @@ class EphemeralWorkspaceUI:
             return
 
         self.browser.close()
+        app_killed = self.app_session.close()
+        sandbox_killed = self.sandbox.close()
         killed = self.browser.force_kill_related_processes()
         stats = self.workspace.destroy()
 
         findings = self.guard.scan_host_persistence_paths(self.session_start_ts) if self.guard else []
 
         if self.audit:
-            self.audit.log("process_kill_fallback", killed_processes=killed, ui=True)
+            self.audit.log("process_kill_fallback", killed_processes=killed + app_killed + sandbox_killed, ui=True)
             self.audit.log("host_persistence_scan", findings=len(findings), ui=True)
             self.audit.log(
                 "workspace_wiped",
@@ -120,6 +198,19 @@ class EphemeralWorkspaceUI:
         self.status_var.set(
             f"Session destroyed. Files wiped: {stats.files_wiped}, bytes overwritten: {stats.bytes_overwritten}{warning}{summary_text}"
         )
+
+    def _pick_storage_root(self) -> None:
+        selected = filedialog.askdirectory(title="Choose storage root folder")
+        if selected:
+            self.storage_root_var.set(selected)
+
+    def _pick_app_executable(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="Choose executable",
+            filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
+        )
+        if selected:
+            self.app_path_var.set(selected)
 
 
 def main() -> None:

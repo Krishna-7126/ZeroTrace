@@ -4,12 +4,17 @@ ZeroTrace — A one-click ephemeral workspace for secure shared systems.
 
 One-click local application for creating an isolated browser workspace that is fully deleted when the session ends.
 
+ZeroTrace now also supports launching arbitrary Windows apps in an ephemeral session, not only browsers.
+
 ## What This Project Implements
 
 - Process isolation with a dedicated Chromium profile (`--user-data-dir`)
+- Full app session mode for launching Windows executables with per-session profile/temp directories
+- Windows Sandbox mode for stronger OS-level ephemeral isolation
 - Temporary-only workspace directories for profile, downloads, and user files
 - Automated secure wipe (multi-pass overwrite + delete)
 - Session lifecycle management with shutdown handlers
+- Optional auto-timeout to force session end and wipe
 - Browser guardrails (disable File Picker APIs + force download path)
 - Crash resilience with hard process-tree kill fallback
 - Judge-ready audit logs and session summary reports
@@ -55,6 +60,24 @@ playwright install chromium
 python launcher.py --url https://example.com
 ```
 
+Run full app-session mode (example with Notepad):
+
+```bash
+python launcher.py --session-type app --app-path notepad.exe --storage-root D:\\ZeroTraceScratch
+```
+
+Run Windows Sandbox mode (requires Windows Sandbox feature enabled):
+
+```bash
+python launcher.py --session-type sandbox --storage-root D:\\ZeroTraceScratch --sandbox-command "explorer.exe C:\\HostSession\\files"
+```
+
+Enable timed auto-destruction (example 15 minutes):
+
+```bash
+python launcher.py --session-type app --app-path notepad.exe --storage-root D:\\ZeroTraceScratch --timeout-min 15
+```
+
 Or run through the unified entry point:
 
 ```bash
@@ -72,6 +95,16 @@ python launcher.py --url https://example.com --wipe-passes 3 --audit-dir audit_l
 ```bash
 python ui.py
 ```
+
+In GUI you can:
+
+1. Choose `Session Type` as `Browser` or `App`
+2. Pick `Storage Root` on the drive you want to consume for session data
+3. For `App` mode choose executable and optional arguments
+4. For `Sandbox` mode provide startup command
+5. Optional: set timeout minutes to auto-end session
+6. Click `Start Secure Session`
+7. Click `End Session & Wipe` to permanently remove session files
 
 Or:
 
@@ -96,6 +129,12 @@ Before creating a public repository and pushing:
 2. Keep personal credentials out of code and use environment variables for future private integrations.
 3. If you add private experiments, place them in ignored files/folders or a private branch.
 4. Confirm no machine-specific absolute paths are present in committed files.
+
+## Important Limitation
+
+For truly system-wide isolation like a separate OS account/container, use Windows Sandbox/VM mode as a next step.
+This project isolates many app writes by redirecting profile/temp/appdata paths, but certain applications may still
+write to host-level locations outside redirected variables.
 
 ## Security Notes
 

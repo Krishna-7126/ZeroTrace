@@ -25,8 +25,13 @@ class WorkspaceManager:
         self._wiper = SecureWiper(passes=wipe_passes)
         self.session_paths: SessionPaths | None = None
 
-    def create(self) -> SessionPaths:
-        session_root = Path(tempfile.mkdtemp(prefix=self._base_prefix))
+    def create(self, storage_root: Path | None = None) -> SessionPaths:
+        if storage_root is None:
+            session_root = Path(tempfile.mkdtemp(prefix=self._base_prefix))
+        else:
+            storage_root.mkdir(parents=True, exist_ok=True)
+            session_root = Path(tempfile.mkdtemp(prefix=self._base_prefix, dir=str(storage_root)))
+
         profile = session_root / "profile"
         downloads = session_root / "downloads"
         user_files = session_root / "files"
