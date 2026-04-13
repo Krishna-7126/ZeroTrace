@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ class AuditLogger:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.events_path = self.output_dir / f"{session_id}.jsonl"
         self.summary_path = self.output_dir / f"{session_id}_summary.txt"
+        self.integrity_path = self.output_dir / f"{session_id}_integrity.txt"
         self.events: list[AuditEvent] = []
 
     def log(self, name: str, **details: Any) -> None:
@@ -70,4 +72,24 @@ class AuditLogger:
         with self.summary_path.open("w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
+        self._write_integrity_report()
+
         return self.summary_path
+
+    def _write_integrity_report(self) -> None:
+        events_hash = self._sha256(self.events_path)
+        summary_hash = self._sha256(self.summary_path)
+        with self.integrity_path.open("w", encoding="utf-8") as f:
+            f.write(f"events_sha256={events_hash}\n")
+            f.write(f"summary_sha256={summary_hash}\n")
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()

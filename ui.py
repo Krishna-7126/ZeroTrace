@@ -11,6 +11,7 @@ from ephemeral_workspace.audit_logger import AuditLogger
 from ephemeral_workspace.app_session_manager import AppSessionManager
 from ephemeral_workspace.browser_manager import BrowserManager
 from ephemeral_workspace.file_guard import FileGuard
+from ephemeral_workspace.preflight import run_preflight
 from ephemeral_workspace.sandbox_manager import SandboxManager
 from ephemeral_workspace.workspace_manager import WorkspaceManager
 
@@ -38,7 +39,9 @@ class EphemeralWorkspaceUI:
         self.app_args_var = tk.StringVar(value="")
         self.sandbox_cmd_var = tk.StringVar(value="explorer.exe C:\\HostSession\\files")
         self.timeout_min_var = tk.StringVar(value="0")
+        self.countdown_var = tk.StringVar(value="Timeout: disabled")
         self.status_var = tk.StringVar(value="Idle")
+        self.session_deadline_ts: float | None = None
 
         self._build()
 
@@ -85,9 +88,13 @@ class EphemeralWorkspaceUI:
         self.start_btn = tk.Button(btn_frame, text="Start Secure Session", command=self.start_session)
         self.start_btn.pack(side=tk.LEFT, padx=(0, 8))
 
+        self.preflight_btn = tk.Button(btn_frame, text="Run Preflight", command=self.run_preflight_check)
+        self.preflight_btn.pack(side=tk.LEFT, padx=(0, 8))
+
         self.end_btn = tk.Button(btn_frame, text="End Session & Wipe", command=self.end_session, state=tk.DISABLED)
         self.end_btn.pack(side=tk.LEFT)
 
+        tk.Label(frame, textvariable=self.countdown_var).pack(anchor="w")
         tk.Label(frame, text="Status:").pack(anchor="w", pady=(12, 0))
         tk.Label(frame, textvariable=self.status_var, wraplength=470, justify="left").pack(anchor="w")
 
@@ -95,8 +102,13 @@ class EphemeralWorkspaceUI:
         if self.running:
             return
 
+        preflight = self._run_preflight(show_dialog=True)
+        if not preflight.ok:
+            return
+
         self.running = True
         self.start_btn.config(state=tk.DISABLED)
+        self.preflight_btn.config(state=tk.DISABLED)
         self.end_btn.config(state=tk.NORMAL)
 
         storage_root = Path(self.storage_root_var.get()).expanduser() if self.storage_root_var.get().strip() else None
@@ -115,6 +127,7 @@ class EphemeralWorkspaceUI:
             timeout_min = 0
 
         if timeout_min > 0:
+            self.session_deadline_ts = time.time() + (timeout_min * 60)
             self.audit.log("timeout_enabled", minutes=timeout_min, ui=True)
 
             def _timeout_worker() -> None:
@@ -123,6 +136,10 @@ class EphemeralWorkspaceUI:
                     self.root.after(0, self.end_session)
 
             threading.Thread(target=_timeout_worker, daemon=True).start()
+            self._start_countdown_updates()
+        else:
+            self.session_deadline_ts = None
+            self.countdown_var.set("Timeout: disabled")
 
         def _worker() -> None:
             try:
@@ -191,7 +208,10 @@ class EphemeralWorkspaceUI:
 
         self.running = False
         self.start_btn.config(state=tk.NORMAL)
+        self.preflight_btn.config(state=tk.NORMAL)
         self.end_btn.config(state=tk.DISABLED)
+        self.session_deadline_ts = None
+        self.countdown_var.set("Timeout: disabled")
 
         warning = f" | host findings: {len(findings)}" if findings else ""
         summary_text = f" | audit: {summary}" if summary else ""
@@ -211,6 +231,48 @@ class EphemeralWorkspaceUI:
         )
         if selected:
             self.app_path_var.set(selected)
+
+    def run_preflight_check(self) -> None:
+        self._run_preflight(show_dialog=True)
+
+    def _run_preflight(self, show_dialog: bool) -> object:
+        storage_root = Path(self.storage_root_var.get()).expanduser() if self.storage_root_var.get().strip() else None
+
+        try:
+            timeout_min = int(self.timeout_min_var.get().strip() or "0")
+        except ValueError:
+            timeout_min = -1
+
+        result = run_preflight(
+            session_type=self.session_type_var.get(),
+            storage_root=storage_root,
+            app_path=self.app_path_var.get(),
+            timeout_min=timeout_min,
+        )
+
+        if show_dialog:
+            title = "Preflight OK" if result.ok else "Preflight Failed"
+            text = result.as_text()
+            if result.ok:
+                messagebox.showinfo(title, text)
+            else:
+                messagebox.showerror(title, text)
+
+        return result
+
+    def _start_countdown_updates(self) -> None:
+        if not self.running:
+            return
+        if not self.session_deadline_ts:
+            self.countdown_var.set("Timeout: disabled")
+            return
+
+        remaining = max(0, int(self.session_deadline_ts - time.time()))
+        mins, secs = divmod(remaining, 60)
+        self.countdown_var.set(f"Timeout in: {mins:02d}:{secs:02d}")
+
+        if remaining > 0 and self.running:
+            self.root.after(1000, self._start_countdown_updates)
 
 
 def main() -> None:

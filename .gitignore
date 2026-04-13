@@ -11,3 +11,8 @@ audit_logs/
 .DS_Store
 Thumbs.db
 *.log
+build/
+dist/
+*.spec
+.coverage
+htmlcov/
