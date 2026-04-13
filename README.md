@@ -158,7 +158,7 @@ Use `Terminal -> Run Task...` and choose:
 
 ## CI
 
-GitHub Actions workflow is included at `.github/workflows/ci.yml` and runs tests on push/PR.
+GitHub Actions workflow is included at `.github/workflows/ci.yml` and runs deterministic `unittest` checks on push/PR.
 
 ## GitHub Safety Checklist
 
