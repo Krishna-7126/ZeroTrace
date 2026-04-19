@@ -57,10 +57,23 @@ class WorkspaceManager:
 
         # Best-effort fallback if secure wipe had partial failures.
         if root.exists():
-            shutil.rmtree(root, ignore_errors=True)
+            self._remove_with_retries(root)
 
         self.session_paths = None
         return stats
 
     def session_label(self) -> str:
         return f"session-{int(time.time())}"
+
+    @staticmethod
+    def _remove_with_retries(root: Path, retries: int = 6, delay_sec: float = 1.5) -> None:
+        for _ in range(retries):
+            if not root.exists():
+                return
+            try:
+                shutil.rmtree(root)
+                return
+            except Exception:
+                time.sleep(delay_sec)
+
+        shutil.rmtree(root, ignore_errors=True)

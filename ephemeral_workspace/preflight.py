@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,6 +91,26 @@ def _check_app_path(app_path: str, result: PreflightResult) -> None:
 def _check_sandbox_available(result: PreflightResult) -> None:
     sandbox_exe = shutil.which("WindowsSandbox.exe")
     if not sandbox_exe:
-        result.errors.append("Windows Sandbox not available. Enable it in Windows Features and reboot.")
+        edition = _detect_windows_edition()
+        if edition and "home" in edition.lower():
+            result.errors.append(
+                "Windows Sandbox is unavailable on Home edition. Upgrade to Pro/Enterprise/Education for Sandbox mode."
+            )
+        else:
+            result.errors.append("Windows Sandbox not available. Enable it in Windows Features and reboot.")
     else:
         result.info.append(f"Windows Sandbox found: {sandbox_exe}")
+
+
+def _detect_windows_edition() -> str | None:
+    if platform.system().lower() != "windows":
+        return None
+    try:
+        import winreg
+
+        key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+            product_name, _ = winreg.QueryValueEx(key, "ProductName")
+            return str(product_name)
+    except Exception:
+        return None

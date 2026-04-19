@@ -70,42 +70,54 @@ def main() -> int:
     )
     audit.log("session_created", root=str(paths.root), downloads=str(paths.downloads))
     is_shutdown = False
+    is_shutting_down = False
+    timeout_triggered = False
 
     def shutdown() -> None:
-        nonlocal is_shutdown
+        nonlocal is_shutdown, is_shutting_down
         if is_shutdown:
             return
-        is_shutdown = True
+        if is_shutting_down:
+            return
+        is_shutting_down = True
 
         print("[*] Closing active session...")
         audit.log("shutdown_requested")
-        browser.close()
-        app_killed = app_session.close()
-        sandbox_killed = sandbox.close()
-        killed = browser.force_kill_related_processes()
-        audit.log("process_kill_fallback", killed_processes=killed + app_killed + sandbox_killed)
+        try:
+            browser.close()
+            app_killed = app_session.close()
+            sandbox_killed = sandbox.close()
+            killed = browser.force_kill_related_processes()
+            audit.log("process_kill_fallback", killed_processes=killed + app_killed + sandbox_killed)
 
-        host_findings = guard.scan_host_persistence_paths(session_start_ts)
-        audit.log("host_persistence_scan", findings=len(host_findings))
+            try:
+                host_findings = guard.scan_host_persistence_paths(session_start_ts)
+            except Exception as exc:
+                host_findings = []
+                audit.log("host_scan_error", error=str(exc))
 
-        if host_findings:
-            print("[!] Warning: possible host-persistent files touched during session:")
-            for finding in host_findings[:15]:
-                print(f"    - {finding}")
-            if len(host_findings) > 15:
-                print(f"    - ... and {len(host_findings) - 15} more")
+            audit.log("host_persistence_scan", findings=len(host_findings))
 
-        print("[*] Wiping temporary workspace...")
-        stats = workspace.destroy()
-        audit.log(
-            "workspace_wiped",
-            files_wiped=stats.files_wiped,
-            bytes_overwritten=stats.bytes_overwritten,
-        )
+            if host_findings:
+                print("[!] Warning: possible host-persistent files touched during session:")
+                for finding in host_findings[:15]:
+                    print(f"    - {finding}")
+                if len(host_findings) > 15:
+                    print(f"    - ... and {len(host_findings) - 15} more")
+        finally:
+            print("[*] Wiping temporary workspace...")
+            stats = workspace.destroy()
+            audit.log(
+                "workspace_wiped",
+                files_wiped=stats.files_wiped,
+                bytes_overwritten=stats.bytes_overwritten,
+            )
 
-        print(f"[+] Wipe complete. Files wiped: {stats.files_wiped}, bytes overwritten: {stats.bytes_overwritten}")
-        summary = audit.write_summary()
-        print(f"[+] Audit summary written: {summary}")
+            print(f"[+] Wipe complete. Files wiped: {stats.files_wiped}, bytes overwritten: {stats.bytes_overwritten}")
+            summary = audit.write_summary()
+            print(f"[+] Audit summary written: {summary}")
+            is_shutdown = True
+            is_shutting_down = False
 
     if args.session_type == "browser":
         browser.install_ctrl_c_handler(on_interrupt=shutdown)
@@ -116,10 +128,15 @@ def main() -> int:
 
     if args.timeout_min > 0:
         def _timer() -> None:
+            nonlocal timeout_triggered
             time.sleep(args.timeout_min * 60)
             if not is_shutdown:
                 print(f"[*] Timeout reached ({args.timeout_min} min). Ending session.")
-                shutdown()
+                timeout_triggered = True
+                # Trigger closure paths to release the main wait loop.
+                browser.close()
+                app_session.close()
+                sandbox.close()
 
         threading.Thread(target=_timer, daemon=True).start()
         audit.log("timeout_enabled", minutes=args.timeout_min)
@@ -153,6 +170,8 @@ def main() -> int:
             sandbox.wait_until_closed()
             audit.log("sandbox_window_closed", pid=pid)
 
+        if timeout_triggered:
+            audit.log("timeout_triggered")
         shutdown()
     except Exception as exc:
         print(f"[!] Error: {exc}")

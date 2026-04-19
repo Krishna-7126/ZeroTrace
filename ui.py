@@ -40,6 +40,7 @@ class EphemeralWorkspaceUI:
         self.sandbox_cmd_var = tk.StringVar(value="explorer.exe C:\\HostSession\\files")
         self.timeout_min_var = tk.StringVar(value="0")
         self.countdown_var = tk.StringVar(value="Timeout: disabled")
+        self.mode_hint_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Idle")
         self.session_deadline_ts: float | None = None
 
@@ -52,11 +53,31 @@ class EphemeralWorkspaceUI:
         tk.Label(frame, text="Session Type:").pack(anchor="w")
         mode_frame = tk.Frame(frame)
         mode_frame.pack(fill=tk.X)
-        tk.Radiobutton(mode_frame, text="Browser", variable=self.session_type_var, value="browser").pack(
+        tk.Radiobutton(
+            mode_frame,
+            text="Browser",
+            variable=self.session_type_var,
+            value="browser",
+            command=self._update_mode_hint,
+        ).pack(
             side=tk.LEFT, padx=(0, 10)
         )
-        tk.Radiobutton(mode_frame, text="App", variable=self.session_type_var, value="app").pack(side=tk.LEFT)
-        tk.Radiobutton(mode_frame, text="Sandbox", variable=self.session_type_var, value="sandbox").pack(side=tk.LEFT, padx=(10, 0))
+        tk.Radiobutton(
+            mode_frame,
+            text="App",
+            variable=self.session_type_var,
+            value="app",
+            command=self._update_mode_hint,
+        ).pack(side=tk.LEFT)
+        tk.Radiobutton(
+            mode_frame,
+            text="Sandbox",
+            variable=self.session_type_var,
+            value="sandbox",
+            command=self._update_mode_hint,
+        ).pack(side=tk.LEFT, padx=(10, 0))
+
+        tk.Label(frame, textvariable=self.mode_hint_var, fg="#0b5", wraplength=720, justify="left").pack(anchor="w", pady=(6, 0))
 
         tk.Label(frame, text="Storage Root (Optional - choose empty folder on desired drive):").pack(anchor="w", pady=(8, 0))
         storage_frame = tk.Frame(frame)
@@ -97,6 +118,8 @@ class EphemeralWorkspaceUI:
         tk.Label(frame, textvariable=self.countdown_var).pack(anchor="w")
         tk.Label(frame, text="Status:").pack(anchor="w", pady=(12, 0))
         tk.Label(frame, textvariable=self.status_var, wraplength=470, justify="left").pack(anchor="w")
+
+        self._update_mode_hint()
 
     def start_session(self) -> None:
         if self.running:
@@ -231,6 +254,19 @@ class EphemeralWorkspaceUI:
         )
         if selected:
             self.app_path_var.set(selected)
+
+    def _update_mode_hint(self) -> None:
+        mode = self.session_type_var.get()
+        if mode == "browser":
+            self.mode_hint_var.set("Browser mode: isolated Chromium profile + secure wipe on session end.")
+            return
+        if mode == "app":
+            self.mode_hint_var.set("App mode: launches selected EXE with redirected profile/temp/appdata paths.")
+            return
+
+        self.mode_hint_var.set(
+            "Sandbox mode: requires Windows Pro/Enterprise/Education. On Home edition, use App mode instead."
+        )
 
     def run_preflight_check(self) -> None:
         self._run_preflight(show_dialog=True)

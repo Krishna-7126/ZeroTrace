@@ -31,4 +31,7 @@ class FileGuard:
         return findings
 
     def _scan_recent(self, base: Path, session_start_ts: float) -> list[Path]:
-        return scan_recent_file_writes(base, session_start_ts)
+        try:
+            return scan_recent_file_writes(base, session_start_ts)
+        except Exception:
+            return []
