@@ -1,2 +1,2 @@
 playwright>=1.52.0
-psutil>=6.0.0.
+psutil>=6.0.0
